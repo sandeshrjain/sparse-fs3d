@@ -108,24 +108,72 @@ def bbox3d2bevcorners(bboxes):
 
     return: shape=(n, 4, 2)
     '''
+    # print(bboxes.shape)
+
+    # centers, dims, angles = bboxes[:, :2], bboxes[:, 3:5], bboxes[:, 6]
+    # # except IndexError:
+    # #     print(bboxes.shape)
+    # #     print("#########error#########")
+    # #     exit()
+
+    # # 1.generate bbox corner coordinates, clockwise from minimal point
+    # bev_corners = np.array([[-0.5, -0.5], [-0.5, 0.5], [0.5, 0.5], [0.5, -0.5]], dtype=np.float32)
+    # bev_corners = bev_corners[None, ...] * dims[:, None, :] # (1, 4, 2) * (n, 1, 2) -> (n, 4, 2)
+
+    # # 2. rotate
+    # rot_sin, rot_cos = np.sin(angles), np.cos(angles)
+    # # in fact, -angle
+    # rot_mat = np.array([[rot_cos, rot_sin], 
+    #                     [-rot_sin, rot_cos]]) # (2, 2, n)
+    # rot_mat = np.transpose(rot_mat, (2, 1, 0)) # (N, 2, 2)
+    # bev_corners = bev_corners @ rot_mat # (n, 4, 2)
+
+    # # 3. translate to centers
+    # bev_corners += centers[:, None, :] 
+    # return bev_corners.astype(np.float32)
+
+
+    '''
+    Convert 3D bounding boxes to Bird’s Eye View (BEV) corner coordinates.
+    
+    Args:
+    - bboxes: (n, 7) array containing [x, y, z, dx, dy, dz, yaw]
+
+    Returns:
+    - bev_corners: (n, 4, 2) array with BEV corners in (x, y) coordinates.
+    '''
+    # Debug: Print shape to verify input
+    #print("Input bboxes shape:", bboxes.shape)
+    
+    # Ensure `bboxes` is not empty
+    if bboxes.shape[0] == 0:
+        print("Warning: Empty bounding boxes received!")
+        return np.zeros((0, 4, 2), dtype=np.float32)
+
+    # Ensure `bboxes` has at least 7 elements
+    if bboxes.shape[1] < 7:
+        print("Error: Bounding boxes must have at least 7 values per box, but received shape:", bboxes.shape)
+        return np.zeros((0, 4, 2), dtype=np.float32)
+
+    # Extract parameters
     centers, dims, angles = bboxes[:, :2], bboxes[:, 3:5], bboxes[:, 6]
 
-    # 1.generate bbox corner coordinates, clockwise from minimal point
+    # 1. Generate bbox corner coordinates (normalized)
     bev_corners = np.array([[-0.5, -0.5], [-0.5, 0.5], [0.5, 0.5], [0.5, -0.5]], dtype=np.float32)
-    bev_corners = bev_corners[None, ...] * dims[:, None, :] # (1, 4, 2) * (n, 1, 2) -> (n, 4, 2)
+    bev_corners = bev_corners[None, ...] * dims[:, None, :]  # Shape: (n, 4, 2)
 
-    # 2. rotate
+    # 2. Compute rotation matrix
     rot_sin, rot_cos = np.sin(angles), np.cos(angles)
-    # in fact, -angle
-    rot_mat = np.array([[rot_cos, rot_sin], 
-                        [-rot_sin, rot_cos]]) # (2, 2, n)
-    rot_mat = np.transpose(rot_mat, (2, 1, 0)) # (N, 2, 2)
-    bev_corners = bev_corners @ rot_mat # (n, 4, 2)
+    rot_mat = np.array([[rot_cos, rot_sin], [-rot_sin, rot_cos]])  # (2, 2, n)
+    rot_mat = np.transpose(rot_mat, (2, 1, 0))  # (n, 2, 2)
 
-    # 3. translate to centers
-    bev_corners += centers[:, None, :] 
+    # 3. Apply rotation
+    bev_corners = bev_corners @ rot_mat  # (n, 4, 2)
+
+    # 4. Translate to object centers
+    bev_corners += centers[:, None, :]
+
     return bev_corners.astype(np.float32)
-
 
 def bbox3d2corners(bboxes):
     '''
@@ -399,13 +447,18 @@ def remove_pts_in_bboxes(points, bboxes, rm=True):
 # modified from https://github.com/open-mmlab/mmdetection3d/blob/master/mmdet3d/core/bbox/structures/utils.py#L11
 def limit_period(val, offset=0.5, period=np.pi):
     """
-    val: array or float
+    Works with both torch.Tensor (including CUDA) and numpy.ndarray/scalars.
+
+    val: Tensor or ndarray
     offset: float
-    period: float
-    return: Value in the range of [-offset * period, (1-offset) * period]
+    period: float or Tensor
     """
-    limited_val = val - np.floor(val / period + offset) * period
-    return limited_val
+    if isinstance(val, torch.Tensor):
+        # use torch.floor so it stays on whatever device val is on
+        return val - torch.floor(val / period + offset) * period
+    else:
+        # fallback to numpy
+        return val - np.floor(val / period + offset) * period
 
 
 def nearest_bev(bboxes):

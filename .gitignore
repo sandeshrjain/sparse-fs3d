@@ -5,3 +5,8 @@ build/
 *_logs*
 tmp/
 results/
+pillar_logs*/
+grace_pillar*.txt
+README.md
+dataset/
+figures/

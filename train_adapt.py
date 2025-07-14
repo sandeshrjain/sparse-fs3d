@@ -79,7 +79,6 @@ def main(args):
 
     if not args.no_cuda:
         device = torch.device("cuda:0")
-
         pointpillars = PointPillars(nclasses=args.nclasses).to(device)
 
         if torch.cuda.device_count() > 1:
@@ -89,19 +88,6 @@ def main(args):
         device = torch.device("cpu")
         pointpillars = PointPillars(nclasses=args.nclasses).to(device)
 
-    start_epoch = 0
-    if args.resume_ckpt:
-        ckpt_path = os.path.join(args.saved_path, 'checkpoints', args.resume_ckpt)
-        print(f"[RESUME] Loading checkpoint: {ckpt_path}")
-        state_dict = torch.load(ckpt_path, map_location=device)
-        if isinstance(pointpillars, torch.nn.DataParallel):
-            pointpillars.module.load_state_dict(state_dict)
-        else:
-            pointpillars.load_state_dict(state_dict)
-
-        # Extract epoch number from filename (e.g., epoch_19.pth → 19)
-        start_epoch = int(args.resume_ckpt.split('_')[-1].split('.')[0])
-
 
     loss_func = Loss()
 
@@ -110,9 +96,9 @@ def main(args):
     optimizer = torch.optim.AdamW(params=pointpillars.parameters(), 
                                   lr=init_lr, 
                                   betas=(0.95, 0.99),
-                                  weight_decay=0.03)
+                                  weight_decay=0.01)
     scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer,  
-                                                    max_lr=init_lr*5, 
+                                                    max_lr=init_lr*10, 
                                                     total_steps=max_iters, 
                                                     pct_start=0.4, 
                                                     anneal_strategy='cos',
@@ -128,7 +114,7 @@ def main(args):
     eval_csv_path = os.path.join(args.saved_path, 'eval_metrics.csv')
 
 
-    for epoch in range(start_epoch, args.max_epoch):
+    for epoch in range(args.max_epoch):
         print('=' * 20, epoch, '=' * 20)
         
         train_step, val_step = 0, 0
@@ -258,7 +244,7 @@ def main(args):
         if (epoch + 1) % args.ckpt_freq_epoch == 0:
             torch.save(pointpillars.state_dict(), os.path.join(saved_ckpt_path, f'epoch_{epoch+1}.pth'))
 
-        if epoch % 10 == 0:
+        if epoch % 1 == 0:
             continue
         pointpillars.eval()
         val_loss_accumulator = {key: 0.0 for key in loss_dict.keys()}
@@ -297,11 +283,8 @@ def main(args):
                 bbox_pred = bbox_pred[pos_idx]
                 batched_bbox_reg = batched_bbox_reg[pos_idx]
                 # sin(a - b) = sin(a)*cos(b) - cos(a)*sin(b)
-                bbox_pred_yaw = bbox_pred[:, -1].clone()
-                gt_yaw = batched_bbox_reg[:, -1].clone()
-                bbox_pred[:, -1] = torch.sin(bbox_pred_yaw) * torch.cos(gt_yaw) - torch.cos(bbox_pred_yaw) * torch.sin(gt_yaw)
-                batched_bbox_reg[:, -1] = 0  # Optional, as loss will operate on sin(a-b) now
-
+                bbox_pred[:, -1] = torch.sin(bbox_pred[:, -1]) * torch.cos(batched_bbox_reg[:, -1])
+                batched_bbox_reg[:, -1] = torch.cos(bbox_pred[:, -1]) * torch.sin(batched_bbox_reg[:, -1])
                 bbox_dir_cls_pred = bbox_dir_cls_pred[pos_idx]
                 batched_dir_labels = batched_dir_labels[pos_idx]
 
@@ -397,12 +380,10 @@ if __name__ == '__main__':
     parser.add_argument('--batch_size', type=int, default=1)
     parser.add_argument('--num_workers', type=int, default=4)
     parser.add_argument('--nclasses', type=int, default=3)
-    parser.add_argument('--init_lr', type=float, default=0.00005)
+    parser.add_argument('--init_lr', type=float, default=0.00015)
     parser.add_argument('--max_epoch', type=int, default=1000)
     parser.add_argument('--log_freq', type=int, default=1)
     parser.add_argument('--ckpt_freq_epoch', type=int, default=1)
-    parser.add_argument('--resume_ckpt', type=str, default=None,
-                    help='Path to a checkpoint to resume training from (e.g., epoch_19.pth)')
     parser.add_argument('--no_cuda', action='store_true',
                         help='whether to use cuda')
     args = parser.parse_args()
